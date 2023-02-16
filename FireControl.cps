@@ -10,8 +10,8 @@
  FORKID {C59C057C-1427-4281-AE93-4F04BBA3F45E}
  */
 
-description = "FireControl Plasma v1.6";
-vendor = "Langmuir Systems";
+description = "FireControl Plasma v1.7";
+vendor = "Langmuir Systems - alesan";
 vendorUrl = "http://www.langmuirsystems.com";
 legal = "Copyright (C) 2012-2019 by Autodesk, Inc.";
 certificationLevel = 2;
@@ -36,7 +36,7 @@ allowedCircularPlanes = 1 << PLANE_XY; // only XY
 
 var maxCuttingFeedRate = 0;
 var firstLoop = true;
-
+var pierceOnly = false;
 
 // statically-defined properties
 staticproperties = {
@@ -62,6 +62,7 @@ properties = {
     cutHeight: 0.063, // toggle between using G0 or G1 with a high Feedrate for rapid movements
     retractHeight: 1, // the retract distance
     ihsSpringback: 0.020,
+    pierceOnlyDetectToggle: false,
 };
 
 // user-defined property definitions
@@ -73,6 +74,7 @@ propertyDefinitions = {
     pierceHeight: {title:"Pierce Height (in)", description:"Height at which to pierce material.", type:"number"},
     cutHeight: {title:"Cut Height (in)", description:"Height at which to cut material.", type:"number"},
     retractHeight: {title:"Retract Height (in)", description:"Height at which to retract above material.", type:"number"},
+    pierceOnlyDetectToggle: {title:"Center pierce only detect", description:"Pierce only the center of holes for cutting operations named 'pierce-only'", type:"boolean"},
 };
 
 var gFormat = createFormat({prefix:"G", decimals:0});
@@ -283,10 +285,14 @@ function onSection() {
 
     writeln("");
 
+    pierceOnly = false;
     if (hasParameter("operation-comment")) {
-        var comment = getParameter("operation-comment");
-        if (comment) {
-            writeComment(comment);
+        var sectionName = getParameter("operation-comment");
+        if (sectionName) {
+            writeComment(sectionName);
+            if(properties.pierceOnlyDetectToggle && sectionName == "pierce-only") {
+                pierceOnly = true;
+            }
         }
     }
 
@@ -322,6 +328,10 @@ function onSection() {
     }
 
     forceAny();
+
+    if(pierceOnly) {
+        return;
+    }
 
     var initialPosition = getFramePosition(currentSection.getInitialPosition());
     if (staticproperties.useG0) {
@@ -376,26 +386,30 @@ function writeG31() {
     }
 }
 
+function writeIHS() {
+    if(properties.ihsToggle){
+        // New Probe + Pierce Height
+        writeBlock(gFormat.format(92), "Z" + xyzFormat.format(0));
+        writeBlock(gFormatDeci.format(38.2), "Z" + xyzFormat.format(-5 * (unit == MM ? 25.4 : 1)), feedOutput.format(staticproperties.ihsRapid * (unit == MM ? 25.4 : 1)));
+        writeBlock(gFormatDeci.format(38.4), "Z" + xyzFormat.format(0.5 * (unit == MM ? 25.4 : 1)), feedOutput.format(staticproperties.ihsSlow * (unit == MM ? 25.4 : 1)));
+        writeBlock(gFormat.format(92), "Z" + xyzFormat.format(0));
+        writeBlock(gFormat.format(0), "Z" + xyzFormat.format((properties.ihsSpringback + 0.02) * (unit == MM ? 25.4 : 1)), "(IHS Springback + Backlash)");
+        writeBlock(gFormat.format(92), "Z" + xyzFormat.format(0));
+        writeBlock(gFormat.format(0), "Z" + xyzFormat.format(properties.pierceHeight * (unit == MM ? 25.4 : 1)), "(Pierce Height)");
+        feedOutput.reset();
+    }
+}
+
 var powerIsOn = false;
 function onPower(power) {
+    if(pierceOnly) {
+        return;
+    }
     initialG31 = false;
 
     if(power){
-
         //-------- BEFORE M3
-
-        if(properties.ihsToggle){
-            // New Probe + Pierce Height
-            writeBlock(gFormat.format(92), "Z" + xyzFormat.format(0));
-            writeBlock(gFormatDeci.format(38.2), "Z" + xyzFormat.format(-5 * (unit == MM ? 25.4 : 1)), feedOutput.format(staticproperties.ihsRapid * (unit == MM ? 25.4 : 1)));
-            writeBlock(gFormatDeci.format(38.4), "Z" + xyzFormat.format(0.5 * (unit == MM ? 25.4 : 1)), feedOutput.format(staticproperties.ihsSlow * (unit == MM ? 25.4 : 1)));
-            writeBlock(gFormat.format(92), "Z" + xyzFormat.format(0));
-            writeBlock(gFormat.format(0), "Z" + xyzFormat.format((properties.ihsSpringback + 0.02) * (unit == MM ? 25.4 : 1)), "(IHS Springback + Backlash)");
-            writeBlock(gFormat.format(92), "Z" + xyzFormat.format(0));
-            writeBlock(gFormat.format(0), "Z" + xyzFormat.format(properties.pierceHeight * (unit == MM ? 25.4 : 1)), "(Pierce Height)");
-            feedOutput.reset();
-        }
-
+        writeIHS();
     } else {
         //--------  BEFORE M5
         // THC Disable
@@ -425,18 +439,19 @@ function onPower(power) {
             writeln("H1");
         }
 
-
     } else {
         //----------- After M5
 
         // New Retract Height
         writeBlock(gFormat.format(0), "Z" + xyzFormat.format(properties.retractHeight * (unit == MM ? 25.4 : 1)));
-
         writeln("");
     }
 }
 
 function onRapid(_x, _y, _z) {
+    if(pierceOnly) {
+        return;
+    }
     var x = xOutput.format(_x);
     var y = yOutput.format(_y);
     var z = zOutput.format(_z);
@@ -459,6 +474,10 @@ function onRapid(_x, _y, _z) {
 }
 
 function onLinear(_x, _y, _z, feed) {
+    if(pierceOnly) {
+        error(localize("This cut operation can only pierce center of holes. It cannot have any linear cut; disable 'Lead-In', 'Lead-Out' and set 'Pierce Clearance' to 0"));
+        return;
+    }
 
     if(getMovement() == MOVEMENT_CUTTING && feed > maxCuttingFeedRate){
         maxCuttingFeedRate = feed;
@@ -513,6 +532,37 @@ function onLinear5D(_x, _y, _z, _a, _b, _c, feed) {
 }
 
 function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
+    if(pierceOnly) {
+        var _x = xOutput.format(cx);
+        var _y = yOutput.format(cy);
+        var _z = zOutput.format(cz);
+        if(_x || _y || _z) {
+            writeComment("Piercing center of hole only");
+            forceXYZ();
+            // G0 to center
+            if (staticproperties.useG0) {
+                // Initial G0 of this section
+                writeBlock(gMotionModal.format(0), xOutput.format(cx), yOutput.format(cy));
+            } else {
+                writeBlock(gMotionModal.format(1), xOutput.format(cx), yOutput.format(cy), feedOutput.format(highFeedrate));
+            }
+            // IHS
+            writeIHS();
+            // power ON
+            writeBlock(mFormat.format(3));
+            // DWELL
+            onDwell(properties.pierceDelay);
+            // optional move down Z to cut height
+            /*if(properties.ihsToggle) {
+                writeBlock(gFormat.format(0), "Z" + xyzFormat.format((properties.cutHeight)*(unit == MM ? 25.4 : 1)), " (Cut Height)");
+            }*/
+            // power off
+            writeBlock(mFormat.format(5));
+            writeBlock(gFormat.format(0), "Z" + xyzFormat.format(properties.retractHeight * (unit == MM ? 25.4 : 1)));
+            writeln("");
+        }
+        return;
+    }
 
     if(getMovement() == MOVEMENT_CUTTING && feed > maxCuttingFeedRate){
         maxCuttingFeedRate = feed;
