@@ -86,6 +86,10 @@ var zFormat = createFormat({decimals:(unit == MM ? 3 : 4), forceDecimal:true});
 var abcFormat = createFormat({decimals:3, forceDecimal:true, scale:DEG});
 var secFormat = createFormat({decimals:3, forceDecimal:true}); // seconds - range 0.001-1000
 var feedFormat = createFormat({decimals:(unit == MM ? 2 : 3), forceDecimal:true});
+// The following format is used to detect "pierce only" circular cuts. CAM might send slightly
+// different center coordinates for circular motions for the same hole, so we round down
+// to the nearest mm or tenth of an inch.
+var pierceOnlyFormat = createFormat({decimals:(unit == MM ? 0 : 1), forceDecimal:true});
 
 var xOutput = createVariable({prefix:"X"}, xyzFormat);
 var yOutput = createVariable({prefix:"Y"}, xyzFormat);
@@ -100,6 +104,11 @@ var feedOutput = createVariable({prefix:"F"}, feedFormat);
 var iOutput = createReferenceVariable({prefix:"I", force:true}, xyzFormat);
 var jOutput = createReferenceVariable({prefix:"J", force:true}, xyzFormat);
 var kOutput = createReferenceVariable({prefix:"K", force:true}, xyzFormat);
+
+// pierce-only detection
+var xPierceOnlyCenter = createVariable({prefix:"X"}, pierceOnlyFormat);
+var yPierceOnlyCenter = createVariable({prefix:"Y"}, pierceOnlyFormat);
+var zPierceOnlyCenter = createVariable({prefix:"Z"}, pierceOnlyFormat);
 
 var gMotionModal = createModal({force:true}, gFormat); // modal group 1 // G0-G3, ...
 var gPlaneModal = createModal({onchange:function () {gMotionModal.reset();}}, gFormat); // modal group 2 // G17-19
@@ -413,6 +422,7 @@ function onPower(power) {
     } else {
         //--------  BEFORE M5
         // THC Disable
+        // Do we need if(!pierceOnly) { } here?
         if(properties.thcToggle) {
             writeln("H0");
         }
@@ -533,9 +543,9 @@ function onLinear5D(_x, _y, _z, _a, _b, _c, feed) {
 
 function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
     if(pierceOnly) {
-        var _x = xOutput.format(cx);
-        var _y = yOutput.format(cy);
-        var _z = zOutput.format(cz);
+        var _x = xPierceOnlyCenter.format(cx);
+        var _y = yPierceOnlyCenter.format(cy);
+        var _z = zPierceOnlyCenter.format(cz);
         if(_x || _y || _z) {
             writeComment("Piercing center of hole only");
             forceXYZ();
