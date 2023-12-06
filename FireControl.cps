@@ -299,7 +299,10 @@ function onSection() {
         var sectionName = getParameter("operation-comment");
         if (sectionName) {
             writeComment(sectionName);
-            if(properties.pierceOnlyDetectToggle && sectionName == "pierce-only") {
+            var prefixMatch = "pierce-only"
+            var sectionNamePrefix = sectionName.substr(0, prefixMatch.length);
+            if(properties.pierceOnlyDetectToggle && sectionNamePrefix == prefixMatch) {
+                writeComment("Pierce-only detected");
                 pierceOnly = true;
             }
         }
